@@ -1,4 +1,3 @@
-ui needs:
 Chat window
 
 Document upload
