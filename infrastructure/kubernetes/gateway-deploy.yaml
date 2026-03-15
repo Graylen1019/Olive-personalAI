@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+spec:
+  replicas: 2 # Runs two copies so if one fails, the other stays up!
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+      - name: api-gateway
+        image: my-api-gateway:v1 # The image we built in Step 8
+        imagePullPolicy: Never # Tells Minikube to look locally, not online
+        ports:
+        - containerPort: 3000
