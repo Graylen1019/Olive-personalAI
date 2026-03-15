@@ -1,32 +1,55 @@
-version: '3.8'
-
 services:
-  # The Python Brain
-  ai-service:
-    build: ./ai-service
-    ports:
-      - "8001:8001"
-    environment:
-      - OLLAMA_HOST=http://host.docker.internal:11434
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  # The Node.js Middleman
+  # --- API Gateway (Node.js/Fastify) ---
   api-gateway:
     build: ./node-services/api-gateway
     ports:
       - "3005:3005"
     environment:
       - AI_SERVICE_URL=http://ai-service:8001
+      - PORT=3005
     depends_on:
       - ai-service
+    networks:
+      - ai-network
 
-  # The React Frontend
-  frontend:
-    build: ./frontend
+  # --- AI Service (Python/FastAPI) ---
+  ai-service:
+    build: ./ai-service
     ports:
-      - "5173:5173"
-    stdin_open: true
-    tty: true
-    # Tells Vite to allow external connections
-    command: npm run dev -- --host 0.0.0.0
+      - "8001:8001"
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - QDRANT_HOST=qdrant
+    volumes:
+      # HOT-RELOAD: This links your Windows folder to the container's /app folder
+      - ./ai-service:/app
+      # PERSISTENCE: Keeps your model weights cached
+      - ai_model_cache:/root/.cache/torch/sentence_transformers
+    # COMMAND OVERRIDE: Tells Python to watch for file changes and restart automatically
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - qdrant
+    networks:
+      - ai-network
+
+  # --- Vector Database (Qdrant) ---
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      # PERSISTENCE: This is the actual "brain memory" hard drive
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - ai-network
+
+networks:
+  ai-network:
+    driver: bridge
+
+volumes:
+  qdrant_storage:
+  ai_model_cache:

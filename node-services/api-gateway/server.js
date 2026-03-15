@@ -1,6 +1,6 @@
 const fastify = require('fastify')({ 
     logger: true,
-    connectionTimeout: 30000 // Give the AI some time to think
+    connectionTimeout: 190000 // Give the AI some time to think
 });
 const axios = require('axios');
 
