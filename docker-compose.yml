@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  # The Python Brain
+  ai-service:
+    build: ./ai-service
+    ports:
+      - "8001:8001"
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # The Node.js Middleman
+  api-gateway:
+    build: ./node-services/api-gateway
+    ports:
+      - "3005:3005"
+    environment:
+      - AI_SERVICE_URL=http://ai-service:8001
+    depends_on:
+      - ai-service
+
+  # The React Frontend
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    stdin_open: true
+    tty: true
+    # Tells Vite to allow external connections
+    command: npm run dev -- --host 0.0.0.0

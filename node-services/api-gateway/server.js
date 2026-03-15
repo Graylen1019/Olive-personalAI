@@ -1,58 +1,82 @@
-const fastify = require('fastify')({ logger: true })
+const fastify = require('fastify')({ 
+    logger: true,
+    connectionTimeout: 30000 // Give the AI some time to think
+});
 const axios = require('axios');
 
-// 1. Register CORS first!
+// 1. Register CORS - This is vital for the React frontend to talk to this API
 fastify.register(require('@fastify/cors'), { 
-  origin: "*",
-  methods: ["POST", "GET", "OPTIONS"]
-})
+    origin: "*",
+    methods: ["POST", "GET", "OPTIONS"]
+});
 
-// 2. Health check route
+// 2. Define the AI Service URL
+// Inside Docker, it uses the service name 'ai-service'
+// Outside Docker (local dev), it falls back to 'localhost'
+const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://ai-service:8001";
+
+// 3. Health Check
 fastify.get('/', async () => {
-  return { status: 'Gateway is active' }
-})
+    return { 
+        status: 'Gateway is active',
+        connected_to: AI_SERVICE_URL 
+    };
+});
 
-// Add this to handle "Memorizing" things
+// 4. Ingest Route (Memory)
 fastify.post('/ingest', async (request, reply) => {
-  try {
-    const { content } = request.body
-    
-    // Note: We use 8001 here because we moved Python to 8001!
-    const aiResponse = await axios.post('http://localhost:8001/ingest', {
-      content: content
-    });
-    
-    return { status: "Success", message: "Gateway passed data to AI Service" }
-  } catch (error) {
-    fastify.log.error(error);
-    return reply.status(500).send({ error: "Could not reach AI Service for ingestion" });
-  }
-})
+    try {
+        const { content } = request.body;
+        
+        const aiResponse = await axios.post(`${AI_SERVICE_URL}/ingest`, {
+            content: content
+        });
+        
+        return { 
+            status: "Success", 
+            message: "Data passed to AI Service",
+            detail: aiResponse.data 
+        };
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({ 
+            error: "AI Service (Ingest) is unreachable",
+            message: error.message 
+        });
+    }
+});
 
-// 3. The Chat route
+// 5. Chat Route (Generation)
 fastify.post('/chat', async (request, reply) => {
-  try {
-    const { message } = request.body
-    
-    // This calls your Python service on port 8000
-    const aiResponse = await axios.post('http://localhost:8001/generate', {
-      message: message
-    });
-    
-    return { response: aiResponse.data.response }
-  } catch (error) {
-    fastify.log.error(error);
-    return reply.status(500).send({ error: "AI Service is unreachable" });
-  }
-})
+    try {
+        const { message } = request.body;
+        
+        // This calls the Python FastAPI service
+        const aiResponse = await axios.post(`${AI_SERVICE_URL}/generate`, {
+            message: message
+        });
+        
+        // Return the final response to your React app
+        return { response: aiResponse.data.response };
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({ 
+            error: "AI Service (Generate) is unreachable",
+            message: error.message 
+        });
+    }
+});
 
+// 6. Start the Server
 const start = async () => {
-  try {
-    // Port 3000 is where your React app is looking
-    await fastify.listen({ port: 3005, host: '0.0.0.0' })
-  } catch (err) {
-    fastify.log.error(err)
-    process.exit(1)
-  }
-}
-start()
+    try {
+        // Listening on 0.0.0.0 is required for Docker to expose the port
+        await fastify.listen({ port: 3005, host: '0.0.0.0' });
+        console.log("Gateway listening on port 3005");
+    } catch (err) {
+        fastify.log.error(err);
+        process.exit(1);
+    }
+};
+
+start();
