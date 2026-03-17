@@ -6,3 +6,6 @@ qdrant-client
 requests
 pydantic
 sentence-transformers
+watchfiles
+psycopg2-binary
+python-dotenv

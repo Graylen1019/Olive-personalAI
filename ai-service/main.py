@@ -7,6 +7,9 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from sentence_transformers import SentenceTransformer
 
+# --- NEW: Import the secure logger ---
+from database import log_chat 
+
 app = FastAPI()
 
 # --- Setup & Configuration ---
@@ -16,9 +19,7 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
 print("Loading Embedding Model (all-MiniLM-L6-v2)...")
 encoder = SentenceTransformer("all-MiniLM-L6-v2")
 
-# Initialize Qdrant Client
 qdrant = QdrantClient(host=QDRANT_HOST, port=6333)
-
 COLLECTION_NAME = "knowledge_base"
 
 def init_db():
@@ -53,7 +54,6 @@ async def ingest_data(req: IngestRequest):
     try:
         print(f"INGEST: Saving new data...")
         vector = encoder.encode(req.content).tolist()
-
         qdrant.upsert(
             collection_name=COLLECTION_NAME,
             points=[
@@ -75,8 +75,6 @@ async def generate_response(req: ChatRequest):
         print(f"\n--- QUERY: {req.message} ---")
         query_vector = encoder.encode(req.message).tolist()
         
-        # SEARCH WITH THRESHOLD
-        # 0.7 means the question must be ~70% similar to the data to trigger RAG
         search_result = qdrant.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
@@ -84,13 +82,9 @@ async def generate_response(req: ChatRequest):
             score_threshold=0.01
         )
         hits = search_result.points
-
         context_list = [hit.payload["text"] for hit in hits]
-        print(f"DEBUG: Found {len(context_list)} relevant snippets above 0.7 threshold.")
-        
         context = "\n".join(context_list) if context_list else "No relevant information found in the knowledge base."
 
-        # Hardened Prompt to prevent "Chattiness"
         prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 You are a secure office assistant. 
 Answer the question using ONLY the context provided below.
@@ -112,7 +106,13 @@ Context:
         )
         
         response.raise_for_status()
-        return {"response": response.json().get("response")}
+        ai_final_text = response.json().get("response")
+
+        # --- NEW: PERSISTENCE LAYER ---
+        # We log the raw user message and the AI's final answer to Postgres
+        log_chat(req.message, ai_final_text)
+
+        return {"response": ai_final_text}
 
     except Exception as e:
         print(f"ERROR: {str(e)}")

@@ -4,7 +4,7 @@ FROM node:22-alpine
 # Set the working directory
 WORKDIR /app
 
-# Copy package files first (helps with caching so 'npm install' is faster)
+# Copy package files first for better caching
 COPY package*.json ./
 
 # Install dependencies
@@ -13,8 +13,8 @@ RUN npm install
 # Copy the rest of your frontend code
 COPY . .
 
-# Expose the port React runs on
-EXPOSE 3000
+# Vite's default port is 5173
+EXPOSE 5173
 
-# Start the development server
-CMD ["npm", "run", "dev"]
+# We add --host 0.0.0.0 so Vite listens to external requests from Docker
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

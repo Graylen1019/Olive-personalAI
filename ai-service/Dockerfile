@@ -1,16 +1,26 @@
-# 1. Use a box that has Python installed
-FROM python:3.10-slim
+FROM python:3.11-slim
 
-# 2. Set the working folder
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-# 3. Copy the 'shopping list' and install libraries
-# Note: We create a requirements.txt file in the next sub-step!
+# 1. Install system libs for Postgres
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. THE SECRET SAUCE: Install CPU-only Torch first
+# This bypasses the 2GB+ NVIDIA/CUDA download
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# 3. Now install the rest of your list
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. Copy the Python code
 COPY . .
 
-# 5. Run the brain
-CMD ["python", "main.py"]
+EXPOSE 8001
+
+CMD ["watchfiles", "python main.py"]
