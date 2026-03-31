@@ -1,7 +1,12 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Sidebar from './components/layout/sidebar';
+import Dock from "./components/layout/Dock";
+import { CommandPalette } from "./components/layout/command-palette";
 import Intelligence from './pages/intelligence';
 import Vault from './pages/vault';
+import Temporal from './pages/temporal';
+import Acoustics from "./pages/acoustics";
+import System from './pages/system';
 
 function App() {
   return (
@@ -14,8 +19,13 @@ function App() {
           <Routes>
             <Route path="/" element={<Intelligence />} />
             <Route path="/vault" element={<Vault />} />
+            <Route path="/temporal" element={<Temporal />} />
+            <Route path="/acoustics" element={<Acoustics />} />
+            <Route path="/system" element={<System />} />
           </Routes>
         </main>
+        <Dock />
+        <CommandPalette /> {/* Just drop it here */}
       </div>
     </Router>
   );

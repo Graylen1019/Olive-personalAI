@@ -13,3 +13,13 @@ CREATE TABLE IF NOT EXISTS chat_history (
     metadata JSONB, -- This is flashy: it stores extra AI info like "score" or "tokens"
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID DEFAULT '00000000-0000-0000-0000-000000000000',
+    title TEXT NOT NULL,
+    description TEXT,
+    start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    status TEXT DEFAULT 'pending', -- 'pending', 'ongoing', 'complete'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

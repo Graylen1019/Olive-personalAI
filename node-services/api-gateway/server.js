@@ -89,6 +89,11 @@ fastify.post('/chat', async (request, reply) => {
     }
 });
 
+fastify.get('/tasks', async (request, reply) => {
+    const aiResponse = await axios.get(`${AI_SERVICE_URL}/tasks`);
+    return aiResponse.data;
+});
+
 // 6. Start the Server
 const start = async () => {
     try {
