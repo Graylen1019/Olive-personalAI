@@ -2,16 +2,18 @@ import os
 import uuid
 import requests
 import uvicorn
+import psycopg2
 from typing import List, Optional
 from datetime import datetime
 
+# Added UploadFile and File for multipart support
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from sentence_transformers import SentenceTransformer
 
-# --- NEW: Import the secure logger from your database.py ---
+# --- NEW: Import the secure logger ---
 from database import log_chat 
 
 app = FastAPI()
@@ -20,6 +22,12 @@ app = FastAPI()
 OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://host.docker.internal:11434")
 QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
 COLLECTION_NAME = "knowledge_base"
+
+# Postgres connection for reading history
+POSTGRES_DB = os.getenv("POSTGRES_DB")
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
 
 print("Loading Embedding Model (all-MiniLM-L6-v2)...")
 encoder = SentenceTransformer("all-MiniLM-L6-v2")
@@ -43,125 +51,126 @@ def init_db():
 
 init_db()
 
-# --- Pydantic Models ---
+# --- Models ---
 class ChatRequest(BaseModel):
     message: str
+    user_id: Optional[str] = "00000000-0000-0000-0000-000000000000"
 
-class IngestRequest(BaseModel):
-    content: str
-    category: Optional[str] = "general" # 'schedule', 'vibe', etc.
-
-# --- Endpoints ---
-
-@app.get("/")
-async def root():
-    return {"status": "graylenOS Brain Active", "version": "4.0-CommandCenter"}
-
-@app.get("/documents")
-async def list_documents():
-    """Retrieve all stored knowledge for the Library view"""
+# --- NEW: Multipart Ingest Route ---
+@app.post("/ingest")
+async def ingest_file(file: UploadFile = File(...)):
+    """Handles binary file uploads from the Gateway/Frontend"""
     try:
-        # We 'scroll' through points to get the metadata/payload
-        results, _ = qdrant.scroll(
-            collection_name=COLLECTION_NAME, 
-            limit=100, 
-            with_payload=True
-        )
-        # Formats the data for your React 'Library' tab
-        docs = []
-        for r in results:
-            docs.append({
-                "id": r.id,
-                "content": r.payload.get("text", ""),
-                "source": r.payload.get("source", "Manual Entry"),
-                "category": r.payload.get("category", "general"),
-                "created_at": r.payload.get("created_at", "Unknown")
-            })
-        return {"documents": docs}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
-    """Upload documents (txt/md) to the Library"""
-    try:
+        # 1. Read the file content
         content = await file.read()
-        text = content.decode('utf-8')
+        text_content = content.decode('utf-8') # Basic decoding for TXT/MD
         
-        vector = encoder.encode(text).tolist()
+        # 2. Vectorize the content
+        vector = encoder.encode(text_content).tolist()
+        
+        # 3. Store in Qdrant (Long-Term Memory)
         qdrant.upsert(
             collection_name=COLLECTION_NAME,
             points=[models.PointStruct(
                 id=str(uuid.uuid4()),
-                vector=vector,
                 payload={
-                    "text": text, 
-                    "source": file.filename, 
-                    "category": "document",
+                    "text": text_content,
+                    "filename": file.filename,
+                    "source": "Manual Upload",
                     "created_at": str(datetime.now())
-                }
+                },
+                vector=vector,
             )]
         )
-        return {"status": "success", "filename": file.filename}
+        
+        print(f"✅ Successfully vectorized: {file.filename}")
+        return {"status": "success", "message": f"Vectorized {file.filename}"}
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        print(f"❌ Ingestion error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/ingest")
-async def ingest_data(req: IngestRequest):
-    """Manual text ingestion for schedule, vibes, or facts"""
+# --- Short-Term Memory Helper ---
+def get_short_term_memory(user_id: str, limit: int = 5):
     try:
-        vector = encoder.encode(req.content).tolist()
-        qdrant.upsert(
-            collection_name=COLLECTION_NAME,
-            points=[
-                models.PointStruct(
-                    id=str(uuid.uuid4()),
-                    payload={
-                        "text": req.content, 
-                        "source": "Manual Entry",
-                        "category": req.category,
-                        "created_at": str(datetime.now())
-                    },
-                    vector=vector,
-                )
-            ],
+        conn = psycopg2.connect(
+            dbname=POSTGRES_DB, user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD, host=POSTGRES_HOST
         )
-        return {"status": "success", "message": "Content memorized"}
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT prompt, response FROM chat_history WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
+            (user_id, limit)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        history = ""
+        for prompt, response in reversed(rows):
+            history += f"User: {prompt}\nAssistant: {response}\n"
+        return history
+    except Exception as e:
+        print(f"Short-term memory error: {e}")
+        return ""
+
+# --- Autonomous Learning ---
+def auto_learn(content: str):
+    vector = encoder.encode(content).tolist()
+    qdrant.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[models.PointStruct(
+            id=str(uuid.uuid4()),
+            payload={
+                "text": content,
+                "source": "Autonomous Learning",
+                "category": "personal_fact",
+                "created_at": str(datetime.now())
+            },
+            vector=vector,
+        )]
+    )
+
+@app.get("/")
+async def root():
+    return {"status": "graylenOS Brain Active", "version": "5.0-MemoryLink"}
+
+@app.get("/documents")
+async def list_documents():
+    try:
+        # Scrolling gets the existing documents from Qdrant
+        results, _ = qdrant.scroll(collection_name=COLLECTION_NAME, limit=100, with_payload=True)
+        docs = [{"id": r.id, **r.payload} for r in results]
+        return {"documents": docs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate")
 async def generate_response(req: ChatRequest):
     try:
-        print(f"\n--- graylenOS QUERY: {req.message} ---")
-        query_vector = encoder.encode(req.message).tolist()
+        history = get_short_term_memory(req.user_id)
         
-        # RAG: Search Qdrant for context
+        query_vector = encoder.encode(req.message).tolist()
         search_result = qdrant.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
-            limit=5, # Increased limit for better context
-            score_threshold=0.35 # Only grab truly relevant stuff
+            limit=3,
+            score_threshold=0.35
         )
-        
-        hits = search_result.points
-        context_list = [hit.payload["text"] for hit in hits]
-        context = "\n".join(context_list) if context_list else "No relevant information found in your personal database."
+        context = "\n".join([hit.payload["text"] for hit in search_result.points])
 
-        # Hardened System Prompt for OliveAI
         prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-You are OliveAI, a personalized executive assistant.
+You are OliveAI, a personalized executive assistant. 
 
-Use information from the user’s personal database (such as schedules, preferences, and documents) whenever it helps answer a question or complete a task.
+Short-Term Memory (Recent Chat):
+{history}
 
-Respond in a clear, natural, and helpful way. Keep the tone professional but relaxed, like a capable assistant speaking with someone they work with regularly.
+Long-Term Context:
+{context}
 
-If the user’s database does not contain the information needed, say that you don’t know based on the current data rather than guessing or inventing details.
+If you don't know the answer from either memory source, say so. Keep it professional but relaxed.
 <|end_header_id|>
-""
-
-Context:
-{context}<|eot_id|><|start_header_id|>user<|end_header_id|>
+<|start_header_id|>user<|end_header_id|>
 {req.message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
 
         response = requests.post(
@@ -170,24 +179,22 @@ Context:
                 "model": "llama3", 
                 "prompt": prompt, 
                 "stream": False,
-                "options": {"temperature": 0.1, "stop": ["<|eot_id|>"]} 
+                "options": {"temperature": 0.2, "stop": ["<|eot_id|>"]} 
             },
             timeout=180, 
         )
-        
-        response.raise_for_status()
         ai_final_text = response.json().get("response")
 
-        # PERSISTENCE: Log to Postgres
         log_chat(req.message, ai_final_text)
+        
+        if any(trigger in req.message.lower() for trigger in ["my girlfriend", "i love", "my favorite"]):
+            auto_learn(req.message)
 
-        # Return response + the sources used
-        sources = list(set([hit.payload.get("source", "Unknown") for hit in hits]))
-        return {"response": ai_final_text, "sources": sources}
+        return {"response": ai_final_text}
 
     except Exception as e:
         print(f"ERROR: {str(e)}")
-        return {"response": "I encountered a system error while processing your request."}
+        return {"response": "System memory error."}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001)

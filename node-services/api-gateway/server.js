@@ -1,18 +1,23 @@
 const fastify = require('fastify')({ 
     logger: true,
-    connectionTimeout: 190000 // Give the AI some time to think
+    connectionTimeout: 190000 
 });
 const axios = require('axios');
+const FormData = require('form-data'); // You may need to: npm install form-data
 
-// 1. Register CORS - This is vital for the React frontend to talk to this API
+// 1. Register CORS
 fastify.register(require('@fastify/cors'), { 
     origin: "*",
     methods: ["POST", "GET", "OPTIONS"]
 });
 
-// 2. Define the AI Service URL
-// Inside Docker, it uses the service name 'ai-service'
-// Outside Docker (local dev), it falls back to 'localhost'
+// 2. NEW: Register Multipart Support (Fixes 415 error)
+fastify.register(require('@fastify/multipart'), {
+    limits: {
+        fileSize: 50 * 1024 * 1024 // 50MB limit
+    }
+});
+
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://ai-service:8001";
 
 // 3. Health Check
@@ -23,40 +28,57 @@ fastify.get('/', async () => {
     };
 });
 
-// 4. Ingest Route (Memory)
+// 4. Updated Ingest Route (Handles Files)
 fastify.post('/ingest', async (request, reply) => {
     try {
-        const { content } = request.body;
+        // Capture the multipart file stream
+        const data = await request.file();
         
-        const aiResponse = await axios.post(`${AI_SERVICE_URL}/ingest`, {
-            content: content
+        if (!data) {
+            return reply.status(400).send({ error: "No file provided" });
+        }
+
+        // Create a new FormData object to send to Python AI Service
+        const form = new FormData();
+        // data.file is the actual readable stream
+        form.append('file', data.file, {
+            filename: data.filename,
+            contentType: data.mimetype,
+        });
+
+        // Forward the file to your Python FastAPI service
+        const aiResponse = await axios.post(`${AI_SERVICE_URL}/ingest`, form, {
+            headers: {
+                ...form.getHeaders(),
+            },
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
         });
         
         return { 
             status: "Success", 
-            message: "Data passed to AI Service",
+            message: `Vectorized: ${data.filename}`,
             detail: aiResponse.data 
         };
+
     } catch (error) {
         fastify.log.error(error);
         return reply.status(500).send({ 
-            error: "AI Service (Ingest) is unreachable",
+            error: "Ingestion Pipeline Failed",
             message: error.message 
         });
     }
 });
 
-// 5. Chat Route (Generation)
+// 5. Chat Route (Unchanged but verified)
 fastify.post('/chat', async (request, reply) => {
     try {
         const { message } = request.body;
         
-        // This calls the Python FastAPI service
         const aiResponse = await axios.post(`${AI_SERVICE_URL}/generate`, {
             message: message
         });
         
-        // Return the final response to your React app
         return { response: aiResponse.data.response };
     } catch (error) {
         fastify.log.error(error);
@@ -70,9 +92,8 @@ fastify.post('/chat', async (request, reply) => {
 // 6. Start the Server
 const start = async () => {
     try {
-        // Listening on 0.0.0.0 is required for Docker to expose the port
         await fastify.listen({ port: 3005, host: '0.0.0.0' });
-        console.log("Gateway listening on port 3005");
+        console.log("Gateway listening on port 3005 with Multipart support");
     } catch (err) {
         fastify.log.error(err);
         process.exit(1);
