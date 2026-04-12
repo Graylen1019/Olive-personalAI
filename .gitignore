@@ -126,3 +126,5 @@ htmlcov/
 *.bak
 *.old
 *.orig
+
+docker-compose.yml

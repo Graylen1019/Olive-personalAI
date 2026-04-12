@@ -24,7 +24,7 @@ function App() {
             <Route path="/system" element={<System />} />
           </Routes>
         </main>
-        <Dock />
+        {/* <Dock /> */}
         <CommandPalette /> {/* Just drop it here */}
       </div>
     </Router>

@@ -7,6 +7,9 @@ services:
     environment:
       - AI_SERVICE_URL=http://ai-service:8001
       - PORT=3005
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=http://localhost:3005/auth/google/callback
     depends_on:
       - ai-service
     networks:
